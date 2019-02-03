@@ -317,7 +317,8 @@ class LSClient(object):
 		try:
 			table, item = int(tok[0]), tok[1]
 		except ValueError as e:
-			log.warning("Invalid update from Lightstreamer server - ignoring message\nError: {}\nupdate_message: {}".format(e, update_message))
+			log.warning("Invalid update from Lightstreamer server - ignoring "
+				+ "message\nError: {}\nupdate_message: {}".format(e, update_message))
 		else:
 			if table in self._subscriptions:
 				self._subscriptions[table].notifyupdate(item)
