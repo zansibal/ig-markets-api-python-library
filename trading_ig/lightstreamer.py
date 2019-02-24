@@ -252,7 +252,7 @@ class LSClient(object):
 		if self._stream_connection is not None:
 			# Close the HTTP connection
 			self._stream_connection.close()
-			log.debug("Connection closed")
+			log.info('Disconnected from Lightstreamer')
 			print("DISCONNECTED FROM LIGHTSTREAMER")
 		else:
 			log.warning("No connection to Lightstreamer")
@@ -269,6 +269,8 @@ class LSClient(object):
 				self._join()
 			else:
 				log.warning("No connection to Lightstreamer")
+		else:
+			log.warning("No connection to Lightstreamer")
 
 	def subscribe(self, subscription):
 		""""Perform a subscription request to Lightstreamer Server."""
@@ -303,7 +305,7 @@ class LSClient(object):
 				del self._subscriptions[subcription_key]
 				log.info("Unsubscribed successfully")
 			else:
-				log.warning("Server error")
+				log.warning("Server error ({})".format(server_response))
 		else:
 			log.warning("No subscription key {0} found!".format(
 						subcription_key))
@@ -377,13 +379,17 @@ class LSClient(object):
 			else:
 				self._forward_update_message(message)
 
-		self._stream_connection = None
+		# self._stream_connection = None
 		if not rebind:
 			log.debug("Closing connection")
 			# Clear internal data structures for session
 			# and subscriptions management.
-			self._stream_connection.close()
-			self._session.clear()
+			if self._stream_connection:
+				self._stream_connection.close()
+
+			if self._session:
+				self._session.clear()
+			
 			self._subscriptions.clear()
 			self._current_subscription_key = 0
 		else:
