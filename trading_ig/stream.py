@@ -13,9 +13,9 @@ logger = logging.getLogger(__name__)
 
 
 class IGStreamService(object):
-    def __init__(self, ig_service):
+    def __init__(self, ig_service, ig_session=None):
         self.ig_service = ig_service
-        self.ig_session = None
+        self.ig_session = ig_session
         self.ls_client = None
 
     def create_session(self):
