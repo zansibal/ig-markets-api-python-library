@@ -144,7 +144,9 @@ class LSClient(object):
 		# Combines the "base_url" with the
 		# required "url" to be used for the specific request.
 		url = urljoin(base_url.geturl(), url)
-		return _urlopen(url, data=self._encode_params(body))
+		body = self._encode_params(params)
+		log.debug("Making a request to <%s> with body <%s>", url, body)
+		return _urlopen(url, data=body)
 
 	def _set_control_link_url(self, custom_address=None):
 		"""Set the address to use for the Control Connection
@@ -164,7 +166,9 @@ class LSClient(object):
 		"""
 		params["LS_session"] = self._session["SessionId"]
 		response = self._call(self._control_url, CONTROL_URL_PATH, params)
-		return response.readline().decode("utf-8").rstrip()
+		decoded_response = response.readline().decode("utf-8").rstrip()
+		log.debug("Server response: <%s>", decoded_response)
+		return decoded_response
 
 	def _read_from_stream(self):
 		"""Read a single line of content of the Stream Connection."""
@@ -180,6 +184,7 @@ class LSClient(object):
 			log.warning("systemd.daemon not available, "
 						+ "no watchdog notifications will be sent.")
 
+		log.debug("Opening a new session to <%s>", self._base_url.geturl())
 		self._stream_connection = self._call(
 			self._base_url,
 			CONNECTION_URL_PATH,
@@ -197,6 +202,7 @@ class LSClient(object):
 		"""Replace a completely consumed connection in listening for an active
 		Session.
 		"""
+		log.debug("Binding to <%s>", self._control_url.geturl())
 		self._stream_connection = self._call(
 			self._control_url,
 			BIND_URL_PATH,
@@ -208,9 +214,12 @@ class LSClient(object):
 		self._bind_counter += 1
 		stream_line = self._read_from_stream()
 		self._handle_stream(stream_line)
+		log.info("Bound to <%s>", self._control_url.geturl())
 
 	def _handle_stream(self, stream_line):
 		if stream_line == OK_CMD:
+			log.info("Successfully connected to <%s>", self._base_url.geturl())
+			log.debug("Starting to handling real-time stream")
 			# Parsing session inkion
 			while 1:
 				next_stream_line = self._read_from_stream()
@@ -226,19 +235,20 @@ class LSClient(object):
 			# Start a new thread to handle real time updates sent
 			# by Lightstreamer Server on the stream connection.
 			self._stream_connection_thread = threading.Thread(
-				name="STREAM-CONN-THREAD-{0}".format(self._bind_counter),
+				name="StreamThread-{0}".format(self._bind_counter),
 				target=self._receive
 			)
 			self._stream_connection_thread.setDaemon(True)
 			self._stream_connection_thread.start()
+			log.info("Started handling of real-time stream")
 		else:
 			lines = self._stream_connection.readlines()
 			lines.insert(0, stream_line)
-			log.error("Server response error: \n{0}".format("".join(lines)))
+			log.error("\nServer response error: \n%s", "".join([str(line) for line in lines]))
 			raise IOError()
 
 	def _join(self):
-		"""Await the natural STREAM-CONN-THREAD termination."""
+		"""Await the natural StreamThread termination."""
 		if self._stream_connection_thread:
 			log.debug("Waiting for thread to terminate")
 			self._stream_connection_thread.join()
@@ -250,25 +260,12 @@ class LSClient(object):
 		the connect() invocation.
 		"""
 		if self._stream_connection is not None:
-			# Close the HTTP connection
-			self._stream_connection.close()
-			log.info('Disconnected from Lightstreamer')
-			print("DISCONNECTED FROM LIGHTSTREAMER")
-		else:
-			log.warning("No connection to Lightstreamer")
-
-	def destroy(self):
-		"""Destroy the session previously opened with
-		the connect() invocation.
-		"""
-		if self._stream_connection is not None:
+			log.debug("Closing session to <%s>", self._base_url.geturl())
 			server_response = self._control({"LS_op": OP_DESTROY})
-			if server_response == OK_CMD:
-				# There is no need to explicitly close the connection,
-				# since it is handled by thread completion.
-				self._join()
-			else:
-				log.warning("No connection to Lightstreamer")
+			# There is no need to explicitly close the connection, since it is
+			# handled by thread completion.
+			self._join()
+			log.info("Closed session to <%s>", self._base_url.geturl())
 		else:
 			log.warning("No connection to Lightstreamer")
 
@@ -279,6 +276,7 @@ class LSClient(object):
 		self._subscriptions[self._current_subscription_key] = subscription
 
 		# Send the control request to perform the subscription
+		log.debug("Making a new subscription request")
 		server_response = self._control({
 			"LS_Table": self._current_subscription_key,
 			"LS_op": OP_ADD,
@@ -287,13 +285,17 @@ class LSClient(object):
 			"LS_schema": " ".join(subscription.field_names),
 			"LS_id": " ".join(subscription.item_names),
 		})
-		log.debug("Server response ---> <{0}>".format(server_response))
+		if server_response == OK_CMD:
+			log.info("Successfully subscribed")
+		else:
+			log.warning("Subscription error")
 		return self._current_subscription_key
 
 	def unsubscribe(self, subcription_key):
 		"""Unregister the Subscription associated to the
 		specified subscription_key.
 		"""
+		log.debug("Making an unsubscription request")
 		if subcription_key in self._subscriptions:
 			server_response = self._control({
 				"LS_Table": subcription_key,
@@ -305,27 +307,24 @@ class LSClient(object):
 				del self._subscriptions[subcription_key]
 				log.info("Unsubscribed successfully")
 			else:
-				log.warning("Server error ({})".format(server_response))
+				log.warning("Unsubscription error")
 		else:
-			log.warning("No subscription key {0} found!".format(
-						subcription_key))
+			log.warning("No subscription key {0} found!".format(subcription_key))
 
 	def _forward_update_message(self, update_message):
 		"""Forwards the real time update to the relative
 		Subscription instance for further dispatching to its listeners.
 		"""
 		log.debug("Received update message ---> <{0}>".format(update_message))
-		tok = update_message.split(',', 1)
 		try:
+			tok = update_message.split(',', 1)
 			table, item = int(tok[0]), tok[1]
-		except ValueError as e:
-			log.debug("Invalid update from Lightstreamer server - ignoring update "
-				+ "message\nError: {}\nupdate_message: {}".format(e, update_message))
-		else:
 			if table in self._subscriptions:
 				self._subscriptions[table].notifyupdate(item)
 			else:
 				log.warning("No subscription found!")
+		except Exception:
+			print(traceback.format.exc())
 
 	def _receive(self):
 		rebind = False
@@ -335,6 +334,8 @@ class LSClient(object):
 			try:
 				message = self._read_from_stream()
 				log.debug("Received message ---> <{0}>".format(message))
+				if not message.strip():
+					message = None
 			except Exception:
 				log.error("Communication error")
 				print(traceback.format_exc())
@@ -379,17 +380,12 @@ class LSClient(object):
 			else:
 				self._forward_update_message(message)
 
-		# self._stream_connection = None
 		if not rebind:
-			log.debug("Closing connection")
+			log.debug("No rebind to <%s>, clearing internal session data", self._base_url.geturl())
 			# Clear internal data structures for session
 			# and subscriptions management.
-			if self._stream_connection:
-				self._stream_connection.close()
-
-			if self._session:
-				self._session.clear()
-			
+			self._stream_connection = None
+			self._session.clear()
 			self._subscriptions.clear()
 			self._current_subscription_key = 0
 		else:
@@ -398,12 +394,13 @@ class LSClient(object):
 
 
 if __name__ == "__main__":
-	logging.basicConfig(level=logging.INFO)
+	logging.basicConfig(stream=sys.stdout, format='%(asctime)s %(levelname)-7s ' +
+						'%(threadName)-15s %(message)s', level=logging.INFO)
 
 	# Establishing a new connection to Lightstreamer Server
 	print("Starting connection")
 	# lightstreamer_client = LSClient("http://localhost:8080", "DEMO")
-	lightstreamer_client = LSClient("http://push.lightstreamer.com", "DEMO")
+	lightstreamer_client = LSClient("http://push.lightstreamer.com", "DEMO1")
 	try:
 		lightstreamer_client.connect()
 	except Exception as e:

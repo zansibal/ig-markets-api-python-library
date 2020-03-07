@@ -490,6 +490,7 @@ class IGService:
             'expiry': expiry,
             'forceOpen': force_open,
             'guaranteedStop': guaranteed_stop,
+            # 'knockoutLevel': knockout_level,
             'level': level,
             'limitDistance': limit_distance,
             'limitLevel': limit_level,
