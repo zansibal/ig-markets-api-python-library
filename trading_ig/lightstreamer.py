@@ -137,7 +137,7 @@ class LSClient(object):
 			dict([(k, v) for (k, v) in _iteritems(params) if v])
 		)
 
-	def _call(self, base_url, url, body):
+	def _call(self, base_url, url, params):
 		"""Open a network connection and performs HTTP Post
 		with provided body.
 		"""
@@ -266,6 +266,7 @@ class LSClient(object):
 			# handled by thread completion.
 			self._join()
 			log.info("Closed session to <%s>", self._base_url.geturl())
+			print("Disconnected from Lightstreamer")
 		else:
 			log.warning("No connection to Lightstreamer")
 
